@@ -8,12 +8,21 @@
 #define PIMULT2 M_PI*2 //2*pi
 #define TWODEVSQRT3 1.15470054 // 2/sqrt(3))
 #define SQRT3 sqrt(3)
+#define RAD2DEG 180/M_PI
+#define RPS2RPM 9.54929659
+#define RPM2RPS 1/RPS2RPM
 
 #define KFLTR 256
-#define RPM2RPS 1/9.54929659
-#define KRPMSCALE 1/10
-#define KFLUXSCALE 1/100
+#define K_RPM_SCALE 1/10
+#define K_REF_FLUX_SCALE 1/100
 #define K_PI_COEF_SCALE 1/100
+#define K_PHASE_SVM_SCALE 16
+#define K_UM_SVM_SCALE 8000
+#define MAX_SVM_PHASE 360*16
+#define K_CURRENT_SCALE 10
+#define K_TORQUE_SCALE 10
+#define K_FLUX_SCALE 100
+
 
 #define K_IA_CALIBRATION 1
 #define K_IB_CALIBRATION 1
@@ -121,66 +130,19 @@ struct PI MagnetizationPI;
 struct DigitFltr UdcFltr;
 
 
-//*** Data Recieve Conversion ***//
+//*** Unsigned Intereger16 MOD ***//
 
-void DataRxConversion (unsigned short *DataRx)
+unsigned short UInt16Mod (short X, short Mod)
 {
-    double RefSpeedRPM;
+    if(X >= Mod)
+        X = X - Mod;
+    if(X < -Mod)
+        X = X + Mod;
+    if(X < 0)
+        X = Mod + X;
     
-    SystemStates = (SystemStates >> 8) << 8 | (char)DataRx[0];
-    
-    if(SystemStates CHECK REVERS)
-        RefSpeedRPM = (double)DataRx[1] *  RPM2RPS * (-1);
-    else
-        RefSpeedRPM = (double)DataRx[1] *  RPM2RPS;
-    RefValues.Wr = (RefSpeedRPM, RefValues.Wr, DataRx[2], RPMNOM, DT);
-    
-    if(SystemStates CHECK RUNCONTROL && ~SystemStates CHECK ALGORITHMRUN)
-    {
-        ZeroCalibrationValues.ZeroIa = DataRx[3];
-        ZeroCalibrationValues.ZeroIb = DataRx[4];
-    }
-    MotorMeasure.Ia = (double)((short)DataRx[3] - ZeroCalibrationValues.ZeroIa) * K_IA_CALIBRATION;
-    MotorMeasure.Ib = (double)((short)DataRx[4] - ZeroCalibrationValues.ZeroIa) * K_IB_CALIBRATION;
-    MotorMeasure.Ic = -MotorMeasure.Ia - MotorMeasure.Ib;
-    
-    if(SystemStates CHECK ZEROCALIBRATION)
-        ZeroCalibrationValues.ZeroUdc = DataRx[5];
-    UdcFltr.In = (double)((short)DataRx[5] - ZeroCalibrationValues.ZeroUdc) * K_UDC_CALIBRATION;
-    DigitFltr(&UdcFltr);
-    MotorMeasure.Udc = UdcFltr.Out;
-    if(MotorMeasure.Udc < 1)
-        MotorMeasure.Udc = 1;
-    
-    MotorMeasure.Wr = (double)DataRx[6] * RPM2RPS * KRPMSCALE;
-    RefValues.Flux = (double)DataRx[7] * KFLUXSCALE;
-    
-    SpeedPI.Kp = (double)DataRx[8] * K_PI_COEF_SCALE;
-    SpeedPI.Ki = (double)DataRx[9] * K_PI_COEF_SCALE;
-    SpeedPI.OutputSaturation = (double)DataRx[10] * K_PI_COEF_SCALE;
-    SpeedPI.IntegralSaturation = SpeedPI.OutputSaturation;
-    
-    FluxPI.Kp = (double)DataRx[11] * K_PI_COEF_SCALE;
-    FluxPI.Ki = (double)DataRx[12] * K_PI_COEF_SCALE;
-    FluxPI.OutputSaturation = (double)DataRx[13] * K_PI_COEF_SCALE;
-    FluxPI.IntegralSaturation = FluxPI.OutputSaturation;
-    
-    TorquePI.Kp = (double)DataRx[14] * K_PI_COEF_SCALE;
-    TorquePI.Ki = (double)DataRx[15] * K_PI_COEF_SCALE;
-    TorquePI.OutputSaturation = (double)DataRx[16] * K_PI_COEF_SCALE;
-    TorquePI.IntegralSaturation = TorquePI.OutputSaturation;
-    
-    IdPI.Kp = (double)DataRx[17] * K_PI_COEF_SCALE;
-    IdPI.Ki = (double)DataRx[18] * K_PI_COEF_SCALE;
-    IdPI.OutputSaturation = (double)DataRx[19] * K_PI_COEF_SCALE;
-    IdPI.IntegralSaturation = IdPI.OutputSaturation;
-    
-    IqPI.Kp = (double)DataRx[20] * K_PI_COEF_SCALE;
-    IqPI.Ki = (double)DataRx[21] * K_PI_COEF_SCALE;
-    IqPI.OutputSaturation = (double)DataRx[22] * K_PI_COEF_SCALE;
-    IqPI.IntegralSaturation = IqPI.OutputSaturation;  
+    return ((unsigned short)X);
 }
-
 
 //*** PI regulator ***//
 
@@ -286,7 +248,7 @@ void SetInitValues (void)
      MagnetizationPI.Kp = KPMAGNET;
      MagnetizationPI.IntegralSaturation = LIMITINTMAGNET;
      MagnetizationPI.OutputSaturation = LIMITOUTMAGNET;
-     SpeedFltr.K = KFLTR;
+     UdcFltr.K = KFLTR;
      ZeroCalibrationValues.ZeroUdc = INITIALZEROUDC;
 }
 
@@ -365,6 +327,88 @@ void MainAlgorithm (void)
     }
 }
 
+//*** Data Recieve Conversion ***//
+
+void DataRxConversion (unsigned short *DataRx)
+{
+    double RefSpeedRPM;
+    
+    SystemStates = (SystemStates >> 8) << 8 | (char)DataRx[0];
+    
+    if(SystemStates CHECK REVERS)
+        RefSpeedRPM = (double)DataRx[1] *  RPM2RPS * (-1);
+    else
+        RefSpeedRPM = (double)DataRx[1] *  RPM2RPS;
+    RefValues.Wr = (RefSpeedRPM, RefValues.Wr, DataRx[2], RPMNOM, DT);
+    
+    if(SystemStates CHECK RUNCONTROL && ~SystemStates CHECK ALGORITHMRUN)
+    {
+        ZeroCalibrationValues.ZeroIa = DataRx[3];
+        ZeroCalibrationValues.ZeroIb = DataRx[4];
+    }
+    MotorMeasure.Ia = (double)((short)DataRx[3] - ZeroCalibrationValues.ZeroIa) * K_IA_CALIBRATION;
+    MotorMeasure.Ib = (double)((short)DataRx[4] - ZeroCalibrationValues.ZeroIa) * K_IB_CALIBRATION;
+    MotorMeasure.Ic = -MotorMeasure.Ia - MotorMeasure.Ib;
+    
+    if(SystemStates CHECK ZEROCALIBRATION)
+        ZeroCalibrationValues.ZeroUdc = DataRx[5];
+    UdcFltr.In = (double)((short)DataRx[5] - ZeroCalibrationValues.ZeroUdc) * K_UDC_CALIBRATION;
+    DigitFltr(&UdcFltr);
+    MotorMeasure.Udc = UdcFltr.Out;
+    if(MotorMeasure.Udc < 1)
+        MotorMeasure.Udc = 1;
+    
+    MotorMeasure.Wr = (double)((short)DataRx[6]) * RPM2RPS * K_RPM_SCALE;
+    RefValues.Flux = (double)DataRx[7] * K_REF_FLUX_SCALE;
+    
+    SpeedPI.Kp = (double)DataRx[8] * K_PI_COEF_SCALE;
+    SpeedPI.Ki = (double)DataRx[9] * K_PI_COEF_SCALE;
+    SpeedPI.OutputSaturation = (double)DataRx[10] * K_PI_COEF_SCALE;
+    SpeedPI.IntegralSaturation = SpeedPI.OutputSaturation;
+    
+    FluxPI.Kp = (double)DataRx[11] * K_PI_COEF_SCALE;
+    FluxPI.Ki = (double)DataRx[12] * K_PI_COEF_SCALE;
+    FluxPI.OutputSaturation = (double)DataRx[13] * K_PI_COEF_SCALE;
+    FluxPI.IntegralSaturation = FluxPI.OutputSaturation;
+    
+    TorquePI.Kp = (double)DataRx[14] * K_PI_COEF_SCALE;
+    TorquePI.Ki = (double)DataRx[15] * K_PI_COEF_SCALE;
+    TorquePI.OutputSaturation = (double)DataRx[16] * K_PI_COEF_SCALE;
+    TorquePI.IntegralSaturation = TorquePI.OutputSaturation;
+    
+    IdPI.Kp = (double)DataRx[17] * K_PI_COEF_SCALE;
+    IdPI.Ki = (double)DataRx[18] * K_PI_COEF_SCALE;
+    IdPI.OutputSaturation = (double)DataRx[19] * K_PI_COEF_SCALE;
+    IdPI.IntegralSaturation = IdPI.OutputSaturation;
+    
+    IqPI.Kp = (double)DataRx[20] * K_PI_COEF_SCALE;
+    IqPI.Ki = (double)DataRx[21] * K_PI_COEF_SCALE;
+    IqPI.OutputSaturation = (double)DataRx[22] * K_PI_COEF_SCALE;
+    IqPI.IntegralSaturation = IqPI.OutputSaturation;  
+}
+
+//*** Data Transmit Conversion ***//
+
+void DataTxConversion (unsigned short *DataTx)
+{
+    DataTx[0] = SystemStates >> 8;
+    DataTx[1] = ControlValues.Um * K_UM_SVM_SCALE;
+    DataTx[2] = UInt16Mod( (ControlValues.Phase * RAD2DEG * K_PHASE_SVM_SCALE), MAX_SVM_PHASE);
+    DataTx[3] = MotorMeasure.Ia * K_CURRENT_SCALE;
+    DataTx[4] = MotorMeasure.Ib * K_CURRENT_SCALE;
+    DataTx[5] = MotorMeasure.Ic * K_CURRENT_SCALE;
+    DataTx[6] = MotorMeasure.Udc;
+    DataTx[7] = RefValues.Wr * RPS2RPM;
+    DataTx[8] = ObserverValues.Torque * K_TORQUE_SCALE;
+    DataTx[9] = ObserverValues.PsiR * K_FLUX_SCALE;
+    DataTx[10] = ObserverValues.ThetaPsiR * RAD2DEG;
+    DataTx[11] = RefValues.Torque * K_TORQUE_SCALE;
+    DataTx[12] = RefValues.TorquePI * K_TORQUE_SCALE;
+    DataTx[13] = RefValues.PsiRPI * K_FLUX_SCALE;
+    DataTx[14] = ControlValues.Usd * K_CURRENT_SCALE;
+    DataTx[15] = ControlValues.Usq * K_CURRENT_SCALE;  
+}
+
 
 
 void main (void)
@@ -407,10 +451,11 @@ void main (void)
     IqPI.IntegralSaturation = 10;
     IqPI.OutputSaturation = 10;
     
-    unsigned short ia=1900;
-    short za=2000;
+    double  um=-2.26;
+    short za=0, ia=-2;
+    unsigned short x=65534;
     Nop();
-    MotorMeasure.Ia = (double)((short)ia - za) * K_IA_CALIBRATION;
+    um=(short)x*0.5;
     Nop();
     
     while(1)
